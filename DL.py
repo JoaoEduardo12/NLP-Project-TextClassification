@@ -114,7 +114,7 @@ class CNN:
         create embedding matrix using pre-trained word vectors
         '''
         embedding_index = dict()
-        f = open("obesity-master/data/mimic3_pp200.txt")
+        f = open("files/mimic3_pp200.txt")
         for line in f:
             values = line.split()
             word = values[0]
