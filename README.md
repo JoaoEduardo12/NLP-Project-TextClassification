@@ -33,4 +33,4 @@ layer works best, though more testing is required.
 
 **Example use:**
 
-python3 Text_Classification.py -train_label_file 'files/train_groundtruth.xml' -test_label_file 'files/test_groundtruth.xml' -classifier deep_learning -data_dir 'files/obesity_records_no_fam_cuis' -process_text True
+python3 Text_Classification.py -train_label_file 'files/train_groundtruth.xml' -test_label_file 'files/test_groundtruth.xml' -classifier deep_learning -data_dir 'files/clinical_notes' -process_text True
