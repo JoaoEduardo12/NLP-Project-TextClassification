@@ -15,14 +15,9 @@ class Classifier:
             self.clf = self.logistic_regression()
         elif model_name == "linear_svm":
             self.clf = self.linear_svm()
-        elif model_name == "cnn":
-            self.clf = self.convolutional_neural_nets()
         else: sys.exit("No classifier specified")
         self.y_pred = self._predict()
         self.metrics = self._metrics_scores()
-
-    def convolutional_neural_nets(self):
-        pass
 
     def logistic_regression(self):
         print("\n Performing Linear SVM \n")
