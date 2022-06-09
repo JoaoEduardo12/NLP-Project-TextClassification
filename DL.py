@@ -1,42 +1,37 @@
 import sys
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
-from tensorflow.keras.layers import Dense, Dropout, Conv1D, Flatten, Conv2D, Embedding, GlobalMaxPooling1D, GlobalMaxPooling2D
+from tensorflow.keras.layers import Dense, Dropout, Conv1D, Flatten, Conv2D, Embedding, GlobalMaxPooling1D, GlobalMaxPooling2D, MaxPooling1D
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.layers import Embedding
-from tensorflow.keras.layers import BatchNormalization, SpatialDropout1D, Activation
+from tensorflow.keras.layers import BatchNormalization, SpatialDropout1D, Activation, Input
 from keras import regularizers
 import numpy as np
 from sklearn.utils import compute_class_weight
 from tensorflow.keras.utils import to_categorical
+from keras.metrics import AUC
+from keras.layers.merge import concatenate
+from keras.models import Model
+from keras.utils import np_utils
+from keras.preprocessing import text
+from keras.utils.vis_utils import plot_model
 
 import matplotlib.pyplot as plt
 physical_devices = tf.config.list_physical_devices('GPU') 
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
-
 plt.style.use('ggplot')
 
+from sklearn.metrics import f1_score, make_scorer, confusion_matrix, accuracy_score, precision_score, recall_score, precision_recall_curve
+
+#### if use tensorflow=2.0.0, then import tensorflow.keras.model_selection 
+from tensorflow.keras import backend as K
+
 class CNN:
-
-    embedding_dim = 200
-    seq_length = 15
-    num_classes_classes = 2
-    num_filters = 256
-    kernel_size = 5
-    vocab_size = 10000
-
-    hidden_dim = 128
-
-    dropout_keep_prob = 0.8
-    learning_rate = 1e-3
-
-    batch_size = 64
-    num_epochs = 20
-
-    print_per_batch = 100
-    save_per_batch = 10
 
 
     def __init__(self, X_train, X_test, y_train, y_test, max_size):
@@ -46,15 +41,20 @@ class CNN:
         from sklearn import preprocessing
         le = preprocessing.LabelEncoder()
         lb = preprocessing.LabelBinarizer()
-        scaler_min_max = preprocessing.MinMaxScaler(feature_range = (0,1))
-        self.X_train = scaler_min_max.fit_transform(X_train.todense())
-        self.X_test = scaler_min_max.fit_transform(X_test.todense())
+        self.X_train = X_train
+        self.X_test = X_test
         self.y_train = le.fit_transform(y_train)
         self.y_test = le.transform(y_test)
         self.max_size = max_size
-        self.vocab_size = self.X_train.shape[1]
-        self.model = self._cnn_architecture()
-        self._compile_model()
+        self.max_size = 2000
+        self.vocab_size = 2000
+        tokenizer = text.Tokenizer(num_words = 2000, oov_token="<00V>")
+        tokenizer.fit_on_texts(X_train)
+        self.X_train = tokenizer.texts_to_sequences(X_train)
+        self.X_test = tokenizer.texts_to_sequences(X_test)
+        self.embedding_matrix = self.create_embedding_matrix(tokenizer)
+        self._padding()
+        self.model = self.cnn_text_classification()
         self._train_cnn()
         self.y_pred = self._predict()
         self.metrics = self._metrics_scores()
@@ -65,51 +65,77 @@ class CNN:
         Paddes sequences with 0s so they all have the same length
         '''
         from tensorflow.keras.preprocessing.sequence import pad_sequences
-        self.X_train = pad_sequences(self.X_train, maxlen = self.max_size, padding = "post")
-        self.X_test = pad_sequences(self.X_test, maxlen = self.max_size, padding = "post")
+        self.X_train = pad_sequences(self.X_train, maxlen = self.max_size, padding = "post", truncating = "post")
+        self.X_test = pad_sequences(self.X_test, maxlen = self.max_size, padding = "post", truncating = "post")
 
-    def _cnn_architecture(self):
-        kernel_size = 5
-        embedding_dim = 125
-        batch_size = 16
-        maxlen = 5000
-        model = Sequential([
-        Embedding(input_dim = self.vocab_size, output_dim = embedding_dim, input_length = maxlen),
-        Conv1D(embedding_dim, kernel_size, padding = "same", data_format = "channels_last",kernel_regularizer=regularizers.l2(0.03)),
-        Activation("relu"),
-        GlobalMaxPooling1D(data_format = "channels_last", keepdims = True),
-        Conv1D(embedding_dim-50, kernel_size, padding = "same", data_format = "channels_last",kernel_regularizer=regularizers.l2(0.03)),
-        Activation("relu"),
-        GlobalMaxPooling1D(data_format = "channels_last"),
-        Flatten(),
-        BatchNormalization(),
-        Dense(512, activation='relu',kernel_regularizer=regularizers.l2(0.01)),
-        BatchNormalization(),
-        Dense(256, activation='relu'),
-        BatchNormalization(),
-        Dense(128, activation='relu',kernel_regularizer=regularizers.l2(0.01)),
-        BatchNormalization(),
-        Dropout(0.5),
-        Dense(1, activation='sigmoid')
-        ])
+    def cnn_text_classification(self):
+        # channel 1
+        vocab_size = self.vocab_size
+        length = self.max_size
+        #vocab_size = 2000
+        #length = 2000
+        inputs = Input(shape=(length,))
+        #embedding1 = Embedding(vocab_size, 182)(inputs)
+        embedding1 = Embedding(vocab_size, 200, weights = [self.embedding_matrix], trainable = False)(inputs)
+        conv1 = Conv1D(filters=14, kernel_size=3, activation='relu', padding = "valid", kernel_regularizer=regularizers.l2(3))(embedding1)
+        drop1 = Dropout(0.5)(conv1)
+        pool1 = MaxPooling1D()(drop1)
+        flat1 = Flatten()(pool1)
+        # channel 2
+        embedding2 = Embedding(vocab_size, 200)(inputs)
+        conv2 = Conv1D(filters=14, kernel_size=4, activation='relu', padding = "valid", kernel_regularizer=regularizers.l2(3))(embedding2)
+        drop2 = Dropout(0.5)(conv2)
+        pool2 = MaxPooling1D()(drop2)
+        flat2 = Flatten()(pool2)
+        # channel 3
+        embedding3 = Embedding(vocab_size, 200)(inputs)
+        conv3 = Conv1D(filters=14, kernel_size=5, activation='relu', padding = "valid", kernel_regularizer=regularizers.l2(3))(embedding3)
+        drop3 = Dropout(0.5)(conv3)
+        pool3 = MaxPooling1D()(drop3)
+        flat3 = Flatten()(pool3)
+        # merge
+        merged = concatenate([flat1, flat2, flat3])
+        # interpretation
+        #dense3 = Dense(200, activation='leaky_relu')(merged)
+        #drop4 = Dropout(0.5)(dense3)
+        dense1 = Dense(128, activation='relu')(merged)
+        drop6 = Dropout(0.5)(dense1)
+        outputs = Dense(1, activation='sigmoid')(drop6)
+        model = Model(inputs=[inputs], outputs=outputs)
+        # compile
+        model.compile(loss='binary_crossentropy', optimizer = keras.optimizers.Adam(learning_rate=0.001), metrics=['acc'])
+        # summarize
         print(model.summary())
+        plot_model(model, show_shapes=True, to_file='multichannel.png')
         return model
 
-    # create embedding matrix using pre-trained word vectors
-    def create_embedding_matrix(self):
-        vocab, embd, word_vector_map = self.loadWord2Vec("/home/edu/Desktop/Modelacao/StatisticalLearning/NLP/obesity-master/data/mimic3_pp200.txt")
-        embedding_dim = len(embd[0])
-        sub_embeddings = np.random.uniform(-0.0, 0.0, (self.vocab_size , embedding_dim))
-        count = 0
-        for i in range(0, self.vocab_size):
-            if(self.X_train[i] in word_vector_map): #word_vector_map.has_key(cnn.words[i])
-                count = count
-                sub_embeddings[i]= word_vector_map.get(self.X_train[i])
+    def create_embedding_matrix(self, tokenizer):
+        '''
+        create embedding matrix using pre-trained word vectors
+        '''
+        embedding_index = dict()
+        f = open("obesity-master/data/mimic3_pp200.txt")
+        for line in f:
+            values = line.split()
+            word = values[0]
+            coefs = np.asarray(values[1:], dtype = "float32")
+            embedding_index[word] = coefs
+        f.close()
+
+        embedding_matrix = np.zeros((self.max_size,200))
+        for word, index in tokenizer.word_index.items():
+            if index > self.max_size - 1:
+                break
             else:
-                count = count + 1
-        return sub_embeddings, embedding_dim
+                embedding_vector = embedding_index.get(word)
+                if embedding_vector is not None:
+                    embedding_matrix[index] = embedding_vector
+        return embedding_matrix
 
     def loadWord2Vec(self, filename):
+        '''
+        Loads word2vec vectors
+        '''
         vocab = []
         embd = []
         word_vector_map = {}
@@ -125,9 +151,27 @@ class CNN:
         return vocab, embd, word_vector_map
 
     def _compile_model(self):
-        #keras.optimizers.Adam(learning_rate=0.001)
-        self.model.compile(optimizer = keras.optimizers.SGD(lr=0.001, momentum=0.9, nesterov=True, clipnorm=1.), loss = "binary_crossentropy", metrics = ["accuracy"])
+        self.model.compile(optimizer = keras.optimizers.SGD(learning_rate=1e-2), loss = "binary_crossentropy", metrics = ["accuracy"])
 
+    def macro_f1(self,y_true, y_pred):    
+        def recall_m(y_true, y_pred):
+            TP = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+            Positives = K.sum(K.round(K.clip(y_true, 0, 1)))
+            
+            recall = TP / (Positives+K.epsilon())    
+            return recall 
+        
+        
+        def precision_m(y_true, y_pred):
+            TP = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+            Pred_Positives = K.sum(K.round(K.clip(y_pred, 0, 1)))
+        
+            precision = TP / (Pred_Positives+K.epsilon())
+            return precision 
+        
+        precision, recall = precision_m(y_true, y_pred), recall_m(y_true, y_pred)
+        
+        return 2*((precision*recall)/(precision+recall+K.epsilon()))
 
     def plot_history(self, history):
         acc = history.history['accuracy']
@@ -151,8 +195,8 @@ class CNN:
     def _train_cnn(self):
         classWeight = compute_class_weight(class_weight = 'balanced', classes = np.unique(self.y_train), y =  np.array(self.y_train))
         classWeight = dict(enumerate(classWeight))
-        history = self.model.fit(self.X_train, self.y_train, verbose = 1, epochs = 200, batch_size = 30, validation_data = (self.X_test, self.y_test), class_weight=classWeight) #class_weight=classWeight
-        self.plot_history(history)
+        history = self.model.fit(self.X_train, self.y_train, verbose = 1, epochs = 40, batch_size = 50, validation_data = (self.X_test, self.y_test), class_weight=classWeight) #class_weight=classWeight
+        #self.plot_history(history)
 
     def _predict(self):
         return self.model.predict(self.X_test)
