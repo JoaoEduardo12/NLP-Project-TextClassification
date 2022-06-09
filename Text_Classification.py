@@ -3,12 +3,10 @@ import shutil
 import argparse
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
-#from keras.preprocessing import text
-#import tensorflow as tf
 import xml.etree.ElementTree as et
-#from Machine_Learning import Classifiers
 from NLP import TextProcessing
 from ML import Classifier
+from DL import CNN
 
 def parse_args():
     '''
@@ -16,9 +14,9 @@ def parse_args():
     '''
     parser = argparse.ArgumentParser(prog="medical_text_classification")
     parser = argparse.ArgumentParser(description='Given a directory with text files, a file with label indications, and a classifier, this program proceeds to classify text')
-    parser.add_argument('-classifier', '--Class', help = 'Give this command, a classification algorithm, including linear_svm, neural_networks, kernel_svm")')
+    parser.add_argument('-classifier', '--Class', help = 'Give this command, a classification algorithm, including linear_svm, deep_learning, logistic_regression")')
     parser.add_argument('-data_dir', '--DataDirectory', help = 'Give this command the label files containing either train and test data')
-    parser.add_argument('-process_text', '--AdvProc', help = 'Give this command a file with the search term in NCBI (right side of the page in "Search Details, when you query an entry")')
+    parser.add_argument('-process_text', '--AdvProc', help = 'Give this command True or False, depending whether or not you would like to perform some NLP tasks before classification")')
     parser.add_argument('-train_label_file', '--TrainLabelFile', help = 'Give this command the label files containing either train and test data')
     parser.add_argument('-test_label_file', '--TestLabelFile', help = 'Give this command the label files containing either train and test data')
     parser.add_argument('-out', '--OutputFile', help = 'Give this command the label files containing either train and test data')
@@ -41,22 +39,28 @@ def main(args):
             corpus = TextProcessing(train_dic, test_dic, task, args.DataDirectory, disease, args.AdvProc)            
             X_train, X_test, y_train, y_test = corpus._get_train_test()
             if args.AdvProc == "True":
-                X_train, X_test = process_text_options(corpus)
+                X_train, X_test = process_text_options(corpus, args.Class)
             print(f"{disease} classification: \n")
-            ml_model = Classifier(X_train, X_test, y_train, y_test, args.Class)
-            print(ml_model.metrics)
-            write_report(task = task, method = args.Class, disease = disease, metrics = ml_model.metrics)
+            if args.Class == "deep_learning":
+                ml_model = CNN(X_train, X_test, y_train, y_test, corpus._get_max_length_docs())
+                print(ml_model.metrics)
+                write_report(task = task, method = args.Class, disease = disease, metrics = ml_model.metrics)
+            else: 
+                ml_model = Classifier(X_train, X_test, y_train, y_test, args.Class)
+                print(ml_model.metrics)
+                write_report(task = task, method = args.Class, disease = disease, metrics = ml_model.metrics)
 
-def process_text_options(corpus):
+def process_text_options(corpus, model):
     '''
     This function only runs when process_text is True
     '''
-    corpus._add_stop_word_vocab("btw")
+    corpus._add_stop_word_vocab({"'s","puo","i","ii","iii"})
     #corpus._remove_stop_word_vocab("beyond")
     corpus._get_nlp_docs()
     corpus._lemmatization()
     corpus._remove_stop_words()
-    X_train, X_test = corpus._return_processed_data()
+    corpus._clean_data()
+    X_train, X_test = corpus._return_processed_data(model)
     return X_train, X_test
 
 def write_report(task, method, disease = "", metrics = "", start = False):
